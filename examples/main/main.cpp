@@ -14,6 +14,7 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include <chrono>
 
 #if defined (__unix__) || (defined (__APPLE__) && defined (__MACH__))
 #include <signal.h>
@@ -90,6 +91,12 @@ static std::string chat_add_and_format(struct llama_model * model, std::vector<c
     LOG_DBG("formatted: '%s'\n", formatted.c_str());
     return formatted;
 }
+
+void signal_handler(int signum){;}
+long long clearsig_time = 0;
+long long lookup_time = 0;
+long long readsig_time = 0;
+long long inf_time = 0;
 
 int main(int argc, char ** argv) {
     common_params params;
@@ -236,7 +243,7 @@ int main(int argc, char ** argv) {
             LOG_INF("%s: loaded a session with prompt size of %d tokens\n", __func__, (int)session_tokens.size());
         }
     }
-
+    auto t_start = chrono::high_resolution_clock::now();
     const bool add_bos = llama_add_bos_token(model);
     if (!llama_model_has_encoder(model)) {
         GGML_ASSERT(!llama_add_eos_token(model));
@@ -250,6 +257,11 @@ int main(int argc, char ** argv) {
         auto prompt = (params.conversation && params.enable_chat_template && !params.prompt.empty())
             ? chat_add_and_format(model, chat_msgs, "system", params.prompt) // format the system prompt in conversation mode
             : params.prompt;
+        signal(SIGUSR1, signal_handler);
+        auto t_clearsig_start = chrono::high_resolution_clock::now();
+        kill(params.parent_pid, SIGUSR1);
+        pause();
+        auto t_clearsig_end = chrono::high_resolution_clock::now();
         if (params.interactive_first || !params.prompt.empty() || session_tokens.empty()) {
             LOG_DBG("tokenize the prompt\n");
             embd_inp = common_tokenize(ctx, prompt, true, true);
@@ -257,7 +269,13 @@ int main(int argc, char ** argv) {
             LOG_DBG("use session tokens\n");
             embd_inp = session_tokens;
         }
-
+        auto t_readsig_start = chrono::high_resolution_clock::now();
+        kill(params.parent_pid, SIGUSR1);
+        pause();
+        auto t_readsig_end = chrono::high_resolution_clock::now();
+        clearsig_time = chrono::duration_cast<chrono::nanoseconds>(t_clearsig_end - t_clearsig_start).count();
+        lookup_time = chrono::duration_cast<chrono::nanoseconds>(t_readsig_start - t_clearsig_end).count();
+        readsig_time = chrono::duration_cast<chrono::nanoseconds>(t_readsig_end - t_readsig_start).count();
         LOG_DBG("prompt: \"%s\"\n", prompt.c_str());
         LOG_DBG("tokens: %s\n", string_from(ctx, embd_inp).c_str());
     }
@@ -873,6 +891,15 @@ int main(int argc, char ** argv) {
             n_remain = params.n_predict;
             is_interacting = true;
         }
+    }
+    auto t_end = chrono::high_resolution_clock::now();
+    inf_time = chrono::duration_cast<chrono::nanoseconds>(t_end - t_start).count();
+    ofstream file("times", ios_base::app); // Open file in append mode
+    if (file.is_open()) {
+        file << clearsig_time << "," << lookup_time << "," << readsig_time << "," << inf_time << "\n";
+        file.close();
+    } else {
+        LOG_ERR("Unable to open timing log file");
     }
 
     if (!path_session.empty() && params.prompt_cache_all && !params.prompt_cache_ro) {

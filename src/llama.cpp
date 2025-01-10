@@ -6458,6 +6458,12 @@ static void llm_load_vocab(
 
     vocab.n_vocab = n_vocab;
     vocab.id_to_token.resize(n_vocab);
+    
+    FILE* outp;
+    outp = fopen("vocab.txt", "a");
+    if (outp == NULL) {
+        outp = stderr;
+    }
 
     for (uint32_t i = 0; i < n_vocab; i++) {
         std::string word = gguf_get_arr_str(ctx, token_idx, i);
@@ -6475,6 +6481,7 @@ static void llm_load_vocab(
         token_data.text  = std::move(word);
         token_data.score = scores ? scores[i] : 0.0f;
         token_data.attr  = LLAMA_TOKEN_ATTR_NORMAL;
+        fprintf(outp, "%s\n", token_data.text.c_str());
 
         if (toktypes) {  //TODO: remove, required until per token attributes are available from GGUF file
             switch(toktypes[i]) {
@@ -6488,6 +6495,9 @@ static void llm_load_vocab(
                 default:                            token_data.attr = LLAMA_TOKEN_ATTR_UNDEFINED;    break;
             }
         }
+    }
+    if (outp != NULL) {
+        fclose(outp);
     }
     GGML_ASSERT(vocab.id_to_token.size() == vocab.token_to_id.size());
 

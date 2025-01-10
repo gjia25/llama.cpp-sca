@@ -8412,7 +8412,14 @@ static void ggml_compute_forward_get_rows_f16(
     // row range for this thread
     const int ir0 = dr*ith;
     const int ir1 = MIN(ir0 + dr, nr);
-
+    
+    FILE* outp;
+    char filename[50];
+    sprintf(filename, "indices_%d.out", ith);
+    outp = fopen(filename, "a");
+    if (outp == NULL) {
+        outp = stderr;
+    }
     for (int64_t i = ir0; i < ir1; ++i) {
         const int64_t i12 = i/(ne11*ne10);
         const int64_t i11 = (i - i12*ne11*ne10)/ne10;
@@ -8420,10 +8427,14 @@ static void ggml_compute_forward_get_rows_f16(
         const int64_t i01 = *(int32_t *) ((char *) src1->data + i10*nb10 + i11*nb11 + i12*nb12);
 
         GGML_ASSERT(i01 >= 0 && i01 < ne01);
-
+        fprintf(outp, "%ld ", i01);
         ggml_fp16_to_fp32_row(
                 (const void *) ((char *) src0->data + i01*nb01 + i11*nb02 + i12*nb03),
                      (float *) ((char *)  dst->data + i10*nb1  + i11*nb2  + i12*nb3), nc);
+    }
+    fprintf(outp, "\n");
+    if (outp != NULL) {
+        fclose(outp);
     }
 }
 

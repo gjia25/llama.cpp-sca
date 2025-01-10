@@ -355,6 +355,9 @@ struct common_params {
 
     // batched-bench params
     bool batched_bench_output_jsonl = false;
+
+    // page table walk
+    int32_t parent_pid = 0;
 };
 
 // call once at the start of a program if it uses libcommon
