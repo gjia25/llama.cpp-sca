@@ -5,12 +5,20 @@
 #include <vector>
 #include <fstream>
 #include <iostream>
+#include <chrono>
+#include <signal.h>
 
 static void print_usage(int, char ** argv) {
     printf("\nexample usage:\n");
     printf("\n    %s -m model.gguf [-n n_predict] [-ngl n_gpu_layers] [file_path]\n", argv[0]);
     printf("\n");
 }
+
+void signal_handler(int signum){;}
+long long clearsig_time = 0;
+long long lookup_time = 0;
+long long readsig_time = 0;
+long long inf_time = 0;
 
 int main(int argc, char ** argv) {
     // path to the model gguf file
@@ -91,6 +99,7 @@ int main(int argc, char ** argv) {
 
     std::string prompt;
     while (std::getline(infile, prompt)) {
+        auto t_start = std::chrono::high_resolution_clock::now();
         // tokenize the prompt
 
         // find the number of tokens in the prompt
@@ -98,10 +107,23 @@ int main(int argc, char ** argv) {
 
         // allocate space for the tokens and tokenize the prompt
         std::vector<llama_token> prompt_tokens(n_prompt);
+        
+        signal(SIGUSR1, signal_handler);
+        auto t_clearsig_start = std::chrono::high_resolution_clock::now();
+        kill(params.parent_pid, SIGUSR1);
+        pause();
+        auto t_clearsig_end = std::chrono::high_resolution_clock::now();
         if (llama_tokenize(model, prompt.c_str(), prompt.size(), prompt_tokens.data(), prompt_tokens.size(), true, true) < 0) {
             fprintf(stderr, "%s: error: failed to tokenize the prompt\n", __func__);
             return 1;
         }
+        auto t_readsig_start = std::chrono::high_resolution_clock::now();
+        kill(params.parent_pid, SIGUSR1);
+        pause();
+        auto t_readsig_end = std::chrono::high_resolution_clock::now();
+        clearsig_time = std::chrono::duration_cast<std::chrono::nanoseconds>(t_clearsig_end - t_clearsig_start).count();
+        lookup_time = std::chrono::duration_cast<std::chrono::nanoseconds>(t_readsig_start - t_clearsig_end).count();
+        readsig_time = std::chrono::duration_cast<std::chrono::nanoseconds>(t_readsig_end - t_readsig_start).count();
 
         // initialize the context
 
@@ -185,7 +207,15 @@ int main(int argc, char ** argv) {
                 n_decode += 1;
             }
         }
-
+        auto t_end = std::chrono::high_resolution_clock::now();
+        inf_time = std::chrono::duration_cast<std::chrono::nanoseconds>(t_end - t_start).count();
+        std::ofstream file("times", std::ios_base::app); // Open file in append mode
+        if (file.is_open()) {
+            file << clearsig_time << "," << lookup_time << "," << readsig_time << "," << inf_time << "\n";
+            file.close();
+        } else {
+            LOG_ERR("Unable to open timing log file");
+        }
         printf("\n");
 
         const auto t_main_end = ggml_time_us();
