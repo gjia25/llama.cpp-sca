@@ -6,11 +6,13 @@
 #include <fstream>
 #include <iostream>
 #include <chrono>
+
 #include <signal.h>
+#include <unistd.h>
 
 static void print_usage(int, char ** argv) {
     printf("\nexample usage:\n");
-    printf("\n    %s -m model.gguf [-n n_predict] [-ngl n_gpu_layers] [file_path]\n", argv[0]);
+    printf("\n    %s -m model.gguf [-n n_predict] [-ngl n_gpu_layers] [-p parent_pid] file_path\n", argv[0]);
     printf("\n");
 }
 
@@ -19,6 +21,7 @@ long long clearsig_time = 0;
 long long lookup_time = 0;
 long long readsig_time = 0;
 long long inf_time = 0;
+int parent_pid = 0;
 
 int main(int argc, char ** argv) {
     // path to the model gguf file
@@ -58,6 +61,18 @@ int main(int argc, char ** argv) {
                 if (i + 1 < argc) {
                     try {
                         ngl = std::stoi(argv[++i]);
+                    } catch (...) {
+                        print_usage(argc, argv);
+                        return 1;
+                    }
+                } else {
+                    print_usage(argc, argv);
+                    return 1;
+                }
+            } else if (strcmp(argv[i], "-p") == 0) {
+                if (i + 1 < argc) {
+                    try {
+                        parent_pid = std::stoi(argv[++i]);
                     } catch (...) {
                         print_usage(argc, argv);
                         return 1;
@@ -110,7 +125,7 @@ int main(int argc, char ** argv) {
         
         signal(SIGUSR1, signal_handler);
         auto t_clearsig_start = std::chrono::high_resolution_clock::now();
-        kill(params.parent_pid, SIGUSR1);
+        kill(parent_pid, SIGUSR1);
         pause();
         auto t_clearsig_end = std::chrono::high_resolution_clock::now();
         if (llama_tokenize(model, prompt.c_str(), prompt.size(), prompt_tokens.data(), prompt_tokens.size(), true, true) < 0) {
@@ -118,7 +133,7 @@ int main(int argc, char ** argv) {
             return 1;
         }
         auto t_readsig_start = std::chrono::high_resolution_clock::now();
-        kill(params.parent_pid, SIGUSR1);
+        kill(parent_pid, SIGUSR1);
         pause();
         auto t_readsig_end = std::chrono::high_resolution_clock::now();
         clearsig_time = std::chrono::duration_cast<std::chrono::nanoseconds>(t_clearsig_end - t_clearsig_start).count();
@@ -214,7 +229,7 @@ int main(int argc, char ** argv) {
             file << clearsig_time << "," << lookup_time << "," << readsig_time << "," << inf_time << "\n";
             file.close();
         } else {
-            LOG_ERR("Unable to open timing log file");
+            fprintf(stderr, "Unable to open timing log file");
         }
         printf("\n");
 
