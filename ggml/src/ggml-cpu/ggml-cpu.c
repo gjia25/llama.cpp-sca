@@ -8413,12 +8413,20 @@ static void ggml_compute_forward_get_rows_f16(
     const int ir0 = dr*ith;
     const int ir1 = MIN(ir0 + dr, nr);
     
-    FILE* outp;
+    FILE *outp, *startp;
     char filename[50];
     sprintf(filename, "indices_%d.out", ith);
     outp = fopen(filename, "a");
     if (outp == NULL) {
         outp = stderr;
+    }
+    startp = fopen("start.out", "a");
+    if (startp == NULL) {
+        startp = stderr;
+    }
+    fprintf(startp, "%ld\n", src0->data);
+    if (startp != NULL) {
+        fclose(startp);
     }
     for (int64_t i = ir0; i < ir1; ++i) {
         const int64_t i12 = i/(ne11*ne10);
