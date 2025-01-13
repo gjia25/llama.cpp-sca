@@ -8415,7 +8415,7 @@ static void ggml_compute_forward_get_rows_f16(
     
     FILE *outp, *startp;
     char filename[50];
-    sprintf(filename, "indices_%d.out", ith);
+    sprintf(filename, "indices_%d", ith);
     outp = fopen(filename, "a");
     if (outp == NULL) {
         outp = stderr;
@@ -8424,7 +8424,7 @@ static void ggml_compute_forward_get_rows_f16(
     if (startp == NULL) {
         startp = stderr;
     }
-    fprintf(startp, "%ld\n", src0->data);
+    fprintf(startp, "%lx\n", src0->data);
     if (startp != NULL) {
         fclose(startp);
     }
