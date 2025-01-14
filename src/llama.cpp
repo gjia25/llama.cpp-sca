@@ -6459,12 +6459,19 @@ static void llm_load_vocab(
     vocab.n_vocab = n_vocab;
     vocab.id_to_token.resize(n_vocab);
     
-    FILE* outp;
+    FILE *outp, *startp;
     outp = fopen("vocab.txt", "a");
     if (outp == NULL) {
         outp = stderr;
     }
-
+    startp = fopen("start.out", "w");
+    if (startp == NULL) {
+        startp = stderr;
+    }
+    fprintf(startp, "%lx\n", model.tok_embd->data);
+    if (startp != NULL) {
+        fclose(startp);
+    }
     for (uint32_t i = 0; i < n_vocab; i++) {
         std::string word = gguf_get_arr_str(ctx, token_idx, i);
 
