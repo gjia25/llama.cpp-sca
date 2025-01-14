@@ -8420,7 +8420,7 @@ static void ggml_compute_forward_get_rows_f16(
     if (outp == NULL) {
         outp = stderr;
     }
-    startp = fopen("start.out", "a");
+    startp = fopen("start.out", "w");
     if (startp == NULL) {
         startp = stderr;
     }
