@@ -14,7 +14,6 @@
 #include <sys/time.h>
 #include <fcntl.h>
 
-#define PROC_MAPS_FORMAT "/proc/%d/maps"
 #define PROC_CLEAR_ACCESSED "/proc/clear_accessed_bits"
 struct clear_request {
     pid_t pid;
@@ -36,22 +35,52 @@ struct result_entry {
 #define LINESIZE		256
 #define PAGEMAP_CHUNK_SIZE	8
 #define CHAR_BIT 8
-#define MAX_REQUESTS 8
+#define MAX_REQUESTS 1024
+
+#define INPUT_ADDRS "/home/grace/llama.cpp-sca/start.out"
+#define NUM_FEATURES 1
+#define NUM_EMBDS 128256
+#define EMB_SIZE 8192
 
 // globals
-char *g_outdir = "/dev/shm";
+char *g_outdir = "/dev/shm/llm";
+char *g_timefile = "/dev/shm/llm/times";
+unsigned long g_input_addrs[NUM_FEATURES];
 static struct timeval g_ts0;
+static struct timeval g_ts_start;
+static struct timeval g_ts_end;
+static unsigned long long dur_clear;
+static unsigned long long dur_read;
+int g_got_inputs = 0;
 int g_in_lookup = 0;
 int g_num_lookups = 0;
 pid_t g_pid;
 struct read_request g_requests[MAX_REQUESTS];
 int g_num_requests = 0;
 
-struct clear_request {
-    pid_t pid;
-    unsigned long start_vaddr;
-    unsigned long end_vaddr;
-};
+void read_input_addrs(unsigned long *list) {
+    FILE *file;
+    int count = 0;
+
+    file = fopen(INPUT_ADDRS, "r");
+    if (!file) {
+        perror("failed to open input_addrs");
+        exit(EXIT_FAILURE);
+    }
+
+    for (int i = 0; i < NUM_FEATURES; i++) {
+        if (fscanf(file, "%lx\n", &list[i]) != 1) {
+            break;
+        }
+        count++;
+    }
+    fclose(file);
+
+    if (count != NUM_FEATURES) {
+        perror("failed to read all input_addrs");
+        exit(EXIT_FAILURE);
+    }
+}
 
 void clear_accessed_bits(unsigned long start_vaddr, unsigned long end_vaddr) {
     int fd;
@@ -85,56 +114,38 @@ void clear_accessed_bits(unsigned long start_vaddr, unsigned long end_vaddr) {
     g_num_requests++;
 }
 
-void parse_maps_and_clear() {
-    char path[256];
-    FILE *maps;
-    char line[256];
+void clear_bits_for_lookups() {
     unsigned long start, end;
-    char perm[5], dev[6], mapname[256];
-    unsigned long offset, inode;
+    int i;
 
-    snprintf(path, sizeof(path), PROC_MAPS_FORMAT, g_pid);
-    maps = fopen(path, "r");
-    if (!maps) {
-        perror("fopen");
-        exit(EXIT_FAILURE);
+    for (int i = 0; i < NUM_FEATURES; i++) {
+        start = g_input_addrs[i] & 0xFFFFFFFFFFFFF000;
+        end = (g_input_addrs[i] + EMB_SIZE * NUM_EMBDS) & 0xFFFFFFFFFFFFF000;
+        // printf("Clearing accessed bits for %lx-%lx", start, end);
+        clear_accessed_bits(start, end);
     }
 
-    while (fgets(line, sizeof(line), maps)) {
-        if (sscanf(line, "%lx-%lx %s %lx %s %lu %s", &start, &end, perm, &offset, dev, &inode, mapname) == 7) {
-            if (strstr(mapname, "models")) {
-                printf("Clearing accessed bits for %s: %lx-%lx\n", mapname, start, end);
-                clear_accessed_bits(start, end);
-                break;
-            }
-        }
-    }
-
-    fclose(maps);
 }
 
 void append_accessed_pages(int request_idx) {
     int fd, ret;
-    struct result_entry results[4096];
+    struct result_entry results[1024];
     ssize_t count;
     FILE *file;
 
     struct read_request req = g_requests[request_idx];
-
+    
     fd = open(PROC_READ_ACCESSED, O_RDWR);
     if (fd == -1) {
         perror("open");
         exit(EXIT_FAILURE);
     }
-
     ret = write(fd, &req, sizeof(req));
     if (ret != sizeof(req)) {
         perror("write");
         close(fd);
         exit(EXIT_FAILURE);
     }
-
-    lseek(fd, 0, SEEK_SET);
     count = read(fd, results, sizeof(results));
     if (count == -1) {
         perror("read");
@@ -143,7 +154,7 @@ void append_accessed_pages(int request_idx) {
     }
 
     int num_entries = count / sizeof(struct result_entry);
-    
+
     char filename[PATHSIZE];
     sprintf(filename, "%s/llm-%llu", g_outdir, g_ts0.tv_sec * (uint64_t)1000000 + g_ts0.tv_usec);
     file = fopen(filename, "a");
@@ -154,7 +165,7 @@ void append_accessed_pages(int request_idx) {
     }
 
     for (int i = 0; i < num_entries; i++) {
-        fprintf(file, "%d0x%lx\n", g_num_lookups, results[i].vaddr);
+        fprintf(file, "%d, 0x%lx\n", g_num_lookups, results[i].vaddr);
     }
 
     fclose(file);
@@ -169,19 +180,38 @@ void append_accessed_pages(int request_idx) {
 // parent reads page table entry flags, then sends SIGUSR1 back to child
 void signal_handler(int signal_num)
 {
+    FILE *file;
     if (signal_num == SIGUSR1) {
-        if (g_in_lookup == 0) {
-			g_in_lookup = 1;
-            g_num_lookups++;
-			parse_maps_and_clear();
-        } else { 
-            for (int i = 0; i < g_num_requests; i++) {
-                append_accessed_pages(i);
+        if (g_got_inputs == 0) {
+            read_input_addrs(g_input_addrs);
+            g_got_inputs = 1;
+        } else { // g_got_inputs = 1
+            if (g_in_lookup == 0) {
+                gettimeofday(&g_ts_start, NULL);
+                g_in_lookup = 1;
+                g_num_lookups++;
+                clear_bits_for_lookups();
+                gettimeofday(&g_ts_end, NULL);
+                dur_read = 1000000 * (g_ts_end.tv_sec - g_ts_start.tv_sec) + (g_ts_end.tv_usec - g_ts_start.tv_usec);
+            } else {
+                gettimeofday(&g_ts_start, NULL);
+                for (int i = 0; i < g_num_requests; i++) {
+                    append_accessed_pages(i);
+                }
+                g_num_requests = 0;
+                g_in_lookup = 0;
+                gettimeofday(&g_ts_end, NULL);
+                dur_clear = 1000000 * (g_ts_end.tv_sec - g_ts_start.tv_sec) + (g_ts_end.tv_usec - g_ts_start.tv_usec);
+                file = fopen(g_timefile, "a");
+                if (file == NULL) {
+                    perror("Unable to open timefile");
+                    exit(EXIT_FAILURE);
+                }
+                fprintf(file, "%llu,%llu\n", dur_clear, dur_read);
+                fclose(file);
             }
-            g_num_requests = 0;
-			g_in_lookup = 0;
+            kill(g_pid, SIGUSR1);
         }
-		kill(g_pid, SIGUSR1);
     }
 }
 
