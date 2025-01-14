@@ -149,7 +149,10 @@ int main(int argc, char ** argv) {
         ctx_params.n_batch = n_prompt;
         // enable performance counters
         ctx_params.no_perf = false;
-
+        // single-threaded execution
+        ctx_params.n_threads = 1;
+        ctx_params.n_threads_batch = 1;
+        
         llama_context * ctx = llama_new_context_with_model(model, ctx_params);
 
         if (ctx == NULL) {
