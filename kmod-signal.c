@@ -251,9 +251,9 @@ int main(int argc, char *argv[])
 		
 		// Pass parent PID to child
 		char pid_arg[20];
-		sprintf(pid_arg, "-p %d", ppid);
-        printf("RUNNING IN CHILD: %s %s %s %s %s %s %s\n", argv[1], argv[2], argv[3], argv[4], argv[5], pid_arg, argv[6]);
-		execlp(argv[1], argv[1], argv[2], argv[3], argv[4], argv[5], pid_arg, argv[6], NULL);
+		sprintf(pid_arg, "%d", ppid);
+        printf("RUNNING IN CHILD: %s %s %s %s %s %s %s %s\n", argv[1], argv[2], argv[3], argv[4], argv[5], "-p", pid_arg, argv[6]);
+		execlp(argv[1], argv[1], argv[2], argv[3], argv[4], argv[5], "-p", pid_arg, argv[6], NULL);
 		
 		// If execlp returns, it means it failed
 		perror("execlp");
