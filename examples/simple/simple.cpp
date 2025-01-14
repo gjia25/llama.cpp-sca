@@ -73,6 +73,7 @@ int main(int argc, char ** argv) {
                 if (i + 1 < argc) {
                     try {
                         parent_pid = std::stoi(argv[++i]);
+                        fprintf(stdout, "Parent PID = %d, actually %d\n", parent_pid, getppid());
                     } catch (...) {
                         print_usage(argc, argv);
                         return 1;
@@ -122,23 +123,12 @@ int main(int argc, char ** argv) {
 
         // allocate space for the tokens and tokenize the prompt
         std::vector<llama_token> prompt_tokens(n_prompt);
-        
-        signal(SIGUSR1, signal_handler);
-        auto t_clearsig_start = std::chrono::high_resolution_clock::now();
-        kill(parent_pid, SIGUSR1);
-        pause();
-        auto t_clearsig_end = std::chrono::high_resolution_clock::now();
+
         if (llama_tokenize(model, prompt.c_str(), prompt.size(), prompt_tokens.data(), prompt_tokens.size(), true, true) < 0) {
             fprintf(stderr, "%s: error: failed to tokenize the prompt\n", __func__);
             return 1;
         }
         auto t_readsig_start = std::chrono::high_resolution_clock::now();
-        kill(parent_pid, SIGUSR1);
-        pause();
-        auto t_readsig_end = std::chrono::high_resolution_clock::now();
-        clearsig_time = std::chrono::duration_cast<std::chrono::nanoseconds>(t_clearsig_end - t_clearsig_start).count();
-        lookup_time = std::chrono::duration_cast<std::chrono::nanoseconds>(t_readsig_start - t_clearsig_end).count();
-        readsig_time = std::chrono::duration_cast<std::chrono::nanoseconds>(t_readsig_end - t_readsig_start).count();
 
         // initialize the context
 
@@ -193,10 +183,21 @@ int main(int argc, char ** argv) {
 
         for (int n_pos = 0; n_pos + batch.n_tokens < n_prompt + n_predict; ) {
             // evaluate the current batch with the transformer model
+            signal(SIGUSR1, signal_handler);
+            auto t_clearsig_start = std::chrono::high_resolution_clock::now();
+            kill(parent_pid, SIGUSR1);
+            pause();
+            auto t_clearsig_end = std::chrono::high_resolution_clock::now();
             if (llama_decode(ctx, batch)) {
                 fprintf(stderr, "%s : failed to eval, return code %d\n", __func__, 1);
                 return 1;
             }
+            kill(parent_pid, SIGUSR1);
+            pause();
+            auto t_readsig_end = std::chrono::high_resolution_clock::now();
+            clearsig_time = std::chrono::duration_cast<std::chrono::nanoseconds>(t_clearsig_end - t_clearsig_start).count();
+            lookup_time = std::chrono::duration_cast<std::chrono::nanoseconds>(t_readsig_start - t_clearsig_end).count();
+            readsig_time = std::chrono::duration_cast<std::chrono::nanoseconds>(t_readsig_end - t_readsig_start).count();
 
             n_pos += batch.n_tokens;
 
@@ -227,7 +228,7 @@ int main(int argc, char ** argv) {
         }
         auto t_end = std::chrono::high_resolution_clock::now();
         inf_time = std::chrono::duration_cast<std::chrono::nanoseconds>(t_end - t_start).count();
-        std::ofstream file("times", std::ios_base::app); // Open file in append mode
+        std::ofstream file("times.out", std::ios_base::app); // Open file in append mode
         if (file.is_open()) {
             file << clearsig_time << "," << lookup_time << "," << readsig_time << "," << inf_time << "\n";
             file.close();

@@ -6459,19 +6459,12 @@ static void llm_load_vocab(
     vocab.n_vocab = n_vocab;
     vocab.id_to_token.resize(n_vocab);
     
-    FILE *outp, *startp;
+    FILE *outp;
     outp = fopen("vocab.txt", "a");
     if (outp == NULL) {
         outp = stderr;
     }
-    startp = fopen("start.out", "w");
-    if (startp == NULL) {
-        startp = stderr;
-    }
-    fprintf(startp, "%lx\n", model.tok_embd->data);
-    if (startp != NULL) {
-        fclose(startp);
-    }
+
     for (uint32_t i = 0; i < n_vocab; i++) {
         std::string word = gguf_get_arr_str(ctx, token_idx, i);
 
@@ -9355,6 +9348,16 @@ static int llama_model_load(const std::string & fname, llama_model & model, llam
     } catch (const std::exception & err) {
         LLAMA_LOG_ERROR("%s: error loading model: %s\n", __func__, err.what());
         return -1;
+    }
+
+    FILE *startp;
+    startp = fopen("start.out", "w");
+    if (startp == NULL) {
+        startp = stderr;
+    }
+    fprintf(startp, "%lx\n", model.tok_embd->data);
+    if (startp != NULL) {
+        fclose(startp);
     }
 
     // loading time will be recalculate after the first eval, so

@@ -120,8 +120,7 @@ void clear_bits_for_lookups() {
 
     for (int i = 0; i < NUM_FEATURES; i++) {
         start = g_input_addrs[i] & 0xFFFFFFFFFFFFF000;
-        end = (g_input_addrs[i] + EMB_SIZE * NUM_EMBDS) & 0xFFFFFFFFFFFFF000;
-        // printf("Clearing accessed bits for %lx-%lx", start, end);
+        end = (g_input_addrs[i] + EMB_SIZE * NUM_EMBDS) & 0xFFFFFFFFFFFFF000 + 1;
         clear_accessed_bits(start, end);
     }
 
@@ -185,33 +184,32 @@ void signal_handler(int signal_num)
         if (g_got_inputs == 0) {
             read_input_addrs(g_input_addrs);
             g_got_inputs = 1;
-        } else { // g_got_inputs = 1
-            if (g_in_lookup == 0) {
-                gettimeofday(&g_ts_start, NULL);
-                g_in_lookup = 1;
-                g_num_lookups++;
-                clear_bits_for_lookups();
-                gettimeofday(&g_ts_end, NULL);
-                dur_read = 1000000 * (g_ts_end.tv_sec - g_ts_start.tv_sec) + (g_ts_end.tv_usec - g_ts_start.tv_usec);
-            } else {
-                gettimeofday(&g_ts_start, NULL);
-                for (int i = 0; i < g_num_requests; i++) {
-                    append_accessed_pages(i);
-                }
-                g_num_requests = 0;
-                g_in_lookup = 0;
-                gettimeofday(&g_ts_end, NULL);
-                dur_clear = 1000000 * (g_ts_end.tv_sec - g_ts_start.tv_sec) + (g_ts_end.tv_usec - g_ts_start.tv_usec);
-                file = fopen(g_timefile, "a");
-                if (file == NULL) {
-                    perror("Unable to open timefile");
-                    exit(EXIT_FAILURE);
-                }
-                fprintf(file, "%llu,%llu\n", dur_clear, dur_read);
-                fclose(file);
-            }
-            kill(g_pid, SIGUSR1);
         }
+        if (g_in_lookup == 0) {
+            gettimeofday(&g_ts_start, NULL);
+            g_in_lookup = 1;
+            g_num_lookups++;
+            clear_bits_for_lookups();
+            gettimeofday(&g_ts_end, NULL);
+            dur_read = 1000000 * (g_ts_end.tv_sec - g_ts_start.tv_sec) + (g_ts_end.tv_usec - g_ts_start.tv_usec);
+        } else {
+            gettimeofday(&g_ts_start, NULL);
+            for (int i = 0; i < g_num_requests; i++) {
+                append_accessed_pages(i);
+            }
+            g_num_requests = 0;
+            g_in_lookup = 0;
+            gettimeofday(&g_ts_end, NULL);
+            dur_clear = 1000000 * (g_ts_end.tv_sec - g_ts_start.tv_sec) + (g_ts_end.tv_usec - g_ts_start.tv_usec);
+            file = fopen(g_timefile, "a");
+            if (file == NULL) {
+                perror("Unable to open timefile");
+                exit(EXIT_FAILURE);
+            }
+            fprintf(file, "%llu,%llu\n", dur_clear, dur_read);
+            fclose(file);
+        }
+        kill(g_pid, SIGUSR1);
     }
 }
 
@@ -271,10 +269,10 @@ int main(int argc, char *argv[])
 			exit(EXIT_FAILURE);
 		}
 
-		printf("Parent: Watching PID %d page references...\n", g_pid);
+		printf("Parent: Watching page references of PID %d ...\n", g_pid);
 
-		
 		signal(SIGUSR1, signal_handler); // Set signal handler for SIGUSR1
+        printf("Parent: Set up signal handler for %d\n", SIGUSR1);
 		while (waitpid(g_pid, NULL, WNOHANG) >= 0) { // Loop until child process exits
 			;
 		}

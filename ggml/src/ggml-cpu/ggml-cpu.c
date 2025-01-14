@@ -8413,12 +8413,18 @@ static void ggml_compute_forward_get_rows_f16(
     const int ir0 = dr*ith;
     const int ir1 = MIN(ir0 + dr, nr);
     
-    FILE *outp;
+    FILE *outp, *addrp;
     char filename[50];
-    sprintf(filename, "indices_%d", ith);
+    sprintf(filename, "indices_%d.out", ith);
     outp = fopen(filename, "a");
     if (outp == NULL) {
         outp = stderr;
+    }
+    char fname[50];
+    sprintf(fname, "addrs_%d.out", ith);
+    addrp = fopen(fname, "a");
+    if (addrp == NULL) {
+        addrp = stderr;
     }
     for (int64_t i = ir0; i < ir1; ++i) {
         const int64_t i12 = i/(ne11*ne10);
@@ -8428,6 +8434,7 @@ static void ggml_compute_forward_get_rows_f16(
 
         GGML_ASSERT(i01 >= 0 && i01 < ne01);
         fprintf(outp, "%ld ", i01);
+        fprintf(addrp, "%lx ", src0->data + i01*nb01 + i11*nb02 + i12*nb03);
         ggml_fp16_to_fp32_row(
                 (const void *) ((char *) src0->data + i01*nb01 + i11*nb02 + i12*nb03),
                      (float *) ((char *)  dst->data + i10*nb1  + i11*nb2  + i12*nb3), nc);
@@ -8435,6 +8442,10 @@ static void ggml_compute_forward_get_rows_f16(
     fprintf(outp, "\n");
     if (outp != NULL) {
         fclose(outp);
+    }
+    fprintf(addrp, "\n");
+    if (addrp != NULL) {
+        fclose(addrp);
     }
 }
 
