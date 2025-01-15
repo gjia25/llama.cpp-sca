@@ -39,8 +39,8 @@ struct result_entry {
 
 #define INPUT_ADDRS "/home/grace/llama.cpp-sca/start.out"
 #define NUM_FEATURES 1
-#define NUM_EMBDS 128256
-#define EMB_SIZE 8192
+#define NUM_EMBDS 250880
+#define EMB_SIZE 1024
 
 // globals
 char *g_outdir = "/dev/shm/llm";
