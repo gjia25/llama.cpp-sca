@@ -38,7 +38,6 @@ struct result_entry {
 #define MAX_REQUESTS 1024
 #define NUM_CORES 16
 
-#define INPUT_ADDRS "/home/grace/llama.cpp-sca/start.out"
 #define NUM_FEATURES 1
 #define NUM_EMBDS 250880
 #define EMB_SIZE 1024
@@ -46,41 +45,37 @@ struct result_entry {
 // globals
 char *g_outdir = "/dev/shm/llm";
 char *g_timefile = "/dev/shm/llm/times";
-unsigned long g_input_addrs[NUM_FEATURES];
+unsigned long g_input_addrs[NUM_CORES-1];
 static struct timeval g_ts0;
 static struct timeval g_ts_start;
 static struct timeval g_ts_end;
 static unsigned long long dur_clear;
 static unsigned long long dur_read;
-int g_got_inputs = 0;
-int g_in_lookup = 0;
+int g_got_inputs[NUM_CORES-1];
+int g_in_lookup[NUM_CORES-1];
 int g_num_lookups = 0;
 pid_t child_pids[NUM_CORES-1];
 struct read_request g_requests[MAX_REQUESTS];
 int g_num_requests = 0;
 
-void read_input_addrs(unsigned long *list) {
+void read_input_addrs(unsigned long *list, pid_t cpid, int cidx) {
     FILE *file;
-    int count = 0;
 
-    file = fopen(INPUT_ADDRS, "r");
+    char fpath[100];
+    sprintf(fpath, "/home/grace/llama.cpp-sca/start-%d.out", cpid);
+    file = fopen(fpath, "r");
     if (!file) {
         perror("failed to open input_addrs");
         exit(EXIT_FAILURE);
     }
-
-    for (int i = 0; i < NUM_FEATURES; i++) {
-        if (fscanf(file, "%lx\n", &list[i]) != 1) {
-            break;
-        }
-        count++;
-    }
-    fclose(file);
-
-    if (count != NUM_FEATURES) {
-        perror("failed to read all input_addrs");
+    
+    if (fscanf(file, "%lx\n", &list[cidx]) != 1) {
+        perror("failed to read input_addr");
         exit(EXIT_FAILURE);
     }
+
+    fclose(file);
+    printf("[Parent] child %d has start addr %lx\n", cidx, list[cidx]);
 }
 
 void clear_accessed_bits(unsigned long start_vaddr, unsigned long end_vaddr, pid_t cpid) {
@@ -115,15 +110,12 @@ void clear_accessed_bits(unsigned long start_vaddr, unsigned long end_vaddr, pid
     g_num_requests++;
 }
 
-void clear_bits_for_lookups(pid_t cpid) {
+void clear_bits_for_lookups(pid_t cpid, int cidx) {
     unsigned long start, end;
-    int i;
 
-    for (int i = 0; i < NUM_FEATURES; i++) {
-        start = g_input_addrs[i] & 0xFFFFFFFFFFFFF000;
-        end = (g_input_addrs[i] + EMB_SIZE * NUM_EMBDS) & 0xFFFFFFFFFFFFF000 + 1;
-        clear_accessed_bits(start, end, cpid);
-    }
+    start = g_input_addrs[cidx] & 0xFFFFFFFFFFFFF000;
+    end = (g_input_addrs[cidx] + EMB_SIZE * NUM_EMBDS) & 0xFFFFFFFFFFFFF000 + 1;
+    clear_accessed_bits(start, end, cpid);
 
 }
 
@@ -132,9 +124,11 @@ void append_accessed_pages(int request_idx) {
     struct result_entry results[1024];
     ssize_t count;
     FILE *file;
+    pid_t pid;
 
     struct read_request req = g_requests[request_idx];
-    
+    pid = req.pid;
+
     fd = open(PROC_READ_ACCESSED, O_RDWR);
     if (fd == -1) {
         perror("open");
@@ -165,7 +159,7 @@ void append_accessed_pages(int request_idx) {
     }
 
     for (int i = 0; i < num_entries; i++) {
-        fprintf(file, "%d, 0x%lx\n", g_num_lookups, results[i].vaddr);
+        fprintf(file, "%d, %d, 0x%lx\n", g_num_lookups, pid, results[i].vaddr);
     }
 
     fclose(file);
@@ -181,32 +175,41 @@ void append_accessed_pages(int request_idx) {
 void signal_handler(int signal_num, siginfo_t *info, void *context)
 {
     pid_t cpid;
+    int cidx;
     if (info == NULL) {
         perror("no siginfo");
         return;
     } else {
         cpid = info->si_pid;
+        for (cidx = 0; cidx < NUM_CORES-1; cidx++) {
+            if (cpid == child_pids[cidx]) {
+                break;
+            }
+        }
+        printf("[Parent] received signal from child %d, PID %d\n", cidx, cpid);
     }
     FILE *file;
     if (signal_num == SIGUSR1) {
-        if (g_got_inputs == 0) {
-            read_input_addrs(g_input_addrs);
-            g_got_inputs = 1;
+        if (g_got_inputs[cidx] == 0) {
+            read_input_addrs(g_input_addrs, cpid, cidx);
+            g_got_inputs[cidx] = 1;
         }
-        if (g_in_lookup == 0) {
+        if (g_in_lookup[cidx] == 0) {
+            printf("[Parent] child %d starting lookup\n", cidx);
             gettimeofday(&g_ts_start, NULL);
-            g_in_lookup = 1;
+            g_in_lookup[cidx] = 1;
             g_num_lookups++;
-            clear_bits_for_lookups(cpid);
+            clear_bits_for_lookups(cpid, cidx);
             gettimeofday(&g_ts_end, NULL);
             dur_read = 1000000 * (g_ts_end.tv_sec - g_ts_start.tv_sec) + (g_ts_end.tv_usec - g_ts_start.tv_usec);
         } else {
+            printf("[Parent] child %d ending lookup\n", cidx);
             gettimeofday(&g_ts_start, NULL);
             for (int i = 0; i < g_num_requests; i++) {
                 append_accessed_pages(i);
             }
             g_num_requests = 0;
-            g_in_lookup = 0;
+            g_in_lookup[cidx] = 0;
             gettimeofday(&g_ts_end, NULL);
             dur_clear = 1000000 * (g_ts_end.tv_sec - g_ts_start.tv_sec) + (g_ts_end.tv_usec - g_ts_start.tv_usec);
             file = fopen(g_timefile, "a");
@@ -244,9 +247,8 @@ int main(int argc, char *argv[])
             // Fork failed
             perror("fork");
             exit(EXIT_FAILURE);
-        } else if (pid == 0) {
-            child_pids[i] = getpid();
-            printf("In child process %d with PID %d\n", i, child_pids[i]);
+        } else if (pid == 0) { // in child
+            printf("[child %d] has PID %d\n", i, getpid());
             
             // Set child process to run on core i
             cpu_set_t cpuset;
@@ -257,18 +259,20 @@ int main(int argc, char *argv[])
                 perror("sched_setaffinity");
                 exit(EXIT_FAILURE);
             }
-            
+
             // Pass parent PID to child
             char pid_arg[20];
             sprintf(pid_arg, "%d", ppid);
             char filepath[20];
             sprintf(filepath, "%s/med%d.txt", argv[6], i);
-            printf("RUNNING IN CHILD %d: %s %s %s %s %s %s %s %s\n", i, argv[1], argv[2], argv[3], argv[4], argv[5], "-p", pid_arg, filepath);
+            printf("[child %d] Running %s %s %s %s %s %s %s %s\n", i, argv[1], argv[2], argv[3], argv[4], argv[5], "-p", pid_arg, filepath);
             execlp(argv[1], argv[1], argv[2], argv[3], argv[4], argv[5], "-p", pid_arg, filepath, NULL);
             
             // If execlp returns, it means it failed
             perror("execlp");
             exit(EXIT_FAILURE);
+        } else { // in parent
+            child_pids[i] = pid;
         }
     }
 
@@ -286,24 +290,26 @@ int main(int argc, char *argv[])
 
     struct sigaction sa;
     sa.sa_sigaction = signal_handler;
-    sa.sa_flags = SA_SIGINFO;
+    sa.sa_flags = SA_SIGINFO | SA_RESTART;
     sigemptyset(&sa.sa_mask);
     if (sigaction(SIGUSR1, &sa, NULL) == -1) {
         perror("sigaction");
         exit(EXIT_FAILURE);
     }
-    
-    printf("Parent: Watching page references of children ...\n");
+    printf("[Parent] Set up signal handler for %d\n", SIGUSR1);
 
-    int status;
-    printf("Parent: Set up signal handler for %d\n", SIGUSR1);
-    while (cpid = waitpid(-1, &status, WNOHANG) > 0) { // Loop until all child processes exit
-        if (cpid > 0) {
-            printf("Parent: Child process %d exited\n", cpid);
+    sleep(1);
+
+    for (int i = 1; i < NUM_CORES; i++) {
+        pid_t cpid = wait(NULL); // Wait for each child process
+        if (cpid == -1) {
+            perror("wait");
+            exit(EXIT_FAILURE);
         }
+        printf("Parent: Child process %d exited\n", cpid);
     }
 
-    printf("Parent: All child processes exited\n");
-    printf("Parent: g_num_lookups = %d\n", g_num_lookups);
+    printf("[Parent] all children exited\n");
+    printf("[Parent] g_num_lookups = %d\n", g_num_lookups);
 	return 1;
 }
