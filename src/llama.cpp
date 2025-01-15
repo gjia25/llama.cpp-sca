@@ -9351,7 +9351,9 @@ static int llama_model_load(const std::string & fname, llama_model & model, llam
     }
 
     FILE *startp;
-    startp = fopen("start.out", "w");
+    char fpath[100];
+    sprintf(fpath, "start-%d.out", getpid());
+    startp = fopen(fpath, "w");
     if (startp == NULL) {
         startp = stderr;
     }

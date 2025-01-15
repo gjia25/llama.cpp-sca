@@ -8376,7 +8376,7 @@ static void ggml_compute_forward_get_rows_q(
     
     FILE *outp, *addrp, *timep;
     char filename[50];
-    sprintf(filename, "indices_%d.out", ith);
+    sprintf(filename, "indices_%d.out", getpid());
     outp = fopen(filename, "a");
     if (outp == NULL) {
         outp = stderr;
@@ -8387,7 +8387,7 @@ static void ggml_compute_forward_get_rows_q(
     if (timep == NULL) {
         timep = stderr;
     }
-    sprintf(fname, "addrs_%d.out", ith);
+    sprintf(fname, "addrs_%d.out", getpid());
     addrp = fopen(fname, "a");
     if (addrp == NULL) {
         addrp = stderr;
@@ -8468,7 +8468,7 @@ static void ggml_compute_forward_get_rows_f16(
     
     FILE *outp, *addrp, *timep;
     char filename[50];
-    sprintf(filename, "indices_%d.out", ith);
+    sprintf(filename, "indices_%d.out", getpid());
     outp = fopen(filename, "a");
     if (outp == NULL) {
         outp = stderr;
@@ -8479,7 +8479,7 @@ static void ggml_compute_forward_get_rows_f16(
     if (timep == NULL) {
         timep = stderr;
     }
-    sprintf(fname, "addrs_%d.out", ith);
+    sprintf(fname, "addrs_%d.out", getpid());
     addrp = fopen(fname, "a");
     if (addrp == NULL) {
         addrp = stderr;
