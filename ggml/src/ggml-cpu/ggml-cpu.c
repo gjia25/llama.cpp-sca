@@ -31,6 +31,8 @@
 #include <limits.h>
 #include <stdarg.h>
 #include <signal.h>
+#include <unistd.h>
+
 #if defined(__gnu_linux__)
 #include <syscall.h>
 #endif
@@ -8371,18 +8373,69 @@ static void ggml_compute_forward_get_rows_q(
     // row range for this thread
     const int ir0 = dr*ith;
     const int ir1 = MIN(ir0 + dr, nr);
+    
+    FILE *outp, *addrp, *timep;
+    char filename[50];
+    sprintf(filename, "indices_%d.out", ith);
+    outp = fopen(filename, "a");
+    if (outp == NULL) {
+        outp = stderr;
+    }
+    char fname[50];
+    sprintf(fname, "times.out");
+    timep = fopen(fname, "a");
+    if (timep == NULL) {
+        timep = stderr;
+    }
+    sprintf(fname, "addrs_%d.out", ith);
+    addrp = fopen(fname, "a");
+    if (addrp == NULL) {
+        addrp = stderr;
+    }
+
+    void signal_handler(int signum){;}
+    struct timespec t_clearsig_start, t_clearsig_end, t_readsig_start, t_readsig_end;
+    long clearsig_time, lookup_time, readsig_time;
+    pid_t parent_pid = getppid();
 
     for (int64_t i = ir0; i < ir1; ++i) {
+        signal(SIGUSR1, signal_handler);
+        clock_gettime(CLOCK_MONOTONIC, &t_clearsig_start);
+        kill(parent_pid, SIGUSR1);
+        pause();
+        clock_gettime(CLOCK_MONOTONIC, &t_clearsig_end);
+
         const int64_t i12 = i/(ne11*ne10);
         const int64_t i11 = (i - i12*ne11*ne10)/ne10;
         const int64_t i10 = (i - i12*ne11*ne10 - i11*ne10);
         const int64_t i01 = *(int32_t *) ((char *) src1->data + i10*nb10 + i11*nb11 + i12*nb12);
 
         GGML_ASSERT(i01 >= 0 && i01 < ne01);
-
+        fprintf(outp, "%ld ", i01);
+        fprintf(addrp, "%lx ", src0->data + i01*nb01 + i11*nb02 + i12*nb03);
         dequantize_row_q(
                 (const void *) ((char *) src0->data + i01*nb01 + i11*nb02 + i12*nb03),
                      (float *) ((char *)  dst->data + i10*nb1  + i11*nb2  + i12*nb3), nc);
+        
+        kill(parent_pid, SIGUSR1);
+        pause();
+        clock_gettime(CLOCK_MONOTONIC, &t_readsig_end);
+        clearsig_time = (t_clearsig_end.tv_sec - t_clearsig_start.tv_sec) * 1000000L + (t_clearsig_end.tv_nsec - t_clearsig_start.tv_nsec) / 1000;
+        lookup_time = (t_readsig_start.tv_sec - t_clearsig_end.tv_sec) * 1000000L + (t_readsig_start.tv_nsec - t_clearsig_end.tv_nsec) / 1000;
+        readsig_time = (t_readsig_end.tv_sec - t_readsig_start.tv_sec) * 1000000L + (t_readsig_end.tv_nsec - t_readsig_start.tv_nsec) / 1000;
+        fprintf(timep, "%ld,%ld,%ld,", clearsig_time, lookup_time, readsig_time);
+    }
+    fprintf(outp, "\n");
+    if (outp != NULL) {
+        fclose(outp);
+    }
+    fprintf(timep, "\n");
+    if (timep != NULL) {
+        fclose(timep);
+    }
+    fprintf(addrp, "\n");
+    if (addrp != NULL) {
+        fclose(addrp);
     }
 }
 
@@ -8413,7 +8466,7 @@ static void ggml_compute_forward_get_rows_f16(
     const int ir0 = dr*ith;
     const int ir1 = MIN(ir0 + dr, nr);
     
-    FILE *outp, *addrp;
+    FILE *outp, *addrp, *timep;
     char filename[50];
     sprintf(filename, "indices_%d.out", ith);
     outp = fopen(filename, "a");
@@ -8421,12 +8474,29 @@ static void ggml_compute_forward_get_rows_f16(
         outp = stderr;
     }
     char fname[50];
+    sprintf(fname, "times.out");
+    timep = fopen(fname, "a");
+    if (timep == NULL) {
+        timep = stderr;
+    }
     sprintf(fname, "addrs_%d.out", ith);
     addrp = fopen(fname, "a");
     if (addrp == NULL) {
         addrp = stderr;
     }
+    
+    void signal_handler(int signum){;}
+    struct timespec t_clearsig_start, t_clearsig_end, t_readsig_start, t_readsig_end;
+    long clearsig_time, lookup_time, readsig_time;
+    pid_t parent_pid = getppid();
+
     for (int64_t i = ir0; i < ir1; ++i) {
+        signal(SIGUSR1, signal_handler);
+        clock_gettime(CLOCK_MONOTONIC, &t_clearsig_start);
+        kill(parent_pid, SIGUSR1);
+        pause();
+        clock_gettime(CLOCK_MONOTONIC, &t_clearsig_end);
+
         const int64_t i12 = i/(ne11*ne10);
         const int64_t i11 = (i - i12*ne11*ne10)/ne10;
         const int64_t i10 = (i - i12*ne11*ne10 - i11*ne10);
@@ -8438,10 +8508,21 @@ static void ggml_compute_forward_get_rows_f16(
         ggml_fp16_to_fp32_row(
                 (const void *) ((char *) src0->data + i01*nb01 + i11*nb02 + i12*nb03),
                      (float *) ((char *)  dst->data + i10*nb1  + i11*nb2  + i12*nb3), nc);
+        kill(parent_pid, SIGUSR1);
+        pause();
+        clock_gettime(CLOCK_MONOTONIC, &t_readsig_end);
+        clearsig_time = (t_clearsig_end.tv_sec - t_clearsig_start.tv_sec) * 1000000L + (t_clearsig_end.tv_nsec - t_clearsig_start.tv_nsec) / 1000;
+        lookup_time = (t_readsig_start.tv_sec - t_clearsig_end.tv_sec) * 1000000L + (t_readsig_start.tv_nsec - t_clearsig_end.tv_nsec) / 1000;
+        readsig_time = (t_readsig_end.tv_sec - t_readsig_start.tv_sec) * 1000000L + (t_readsig_end.tv_nsec - t_readsig_start.tv_nsec) / 1000;
+        fprintf(timep, "%ld,%ld,%ld,", clearsig_time, lookup_time, readsig_time);
     }
     fprintf(outp, "\n");
     if (outp != NULL) {
         fclose(outp);
+    }
+    fprintf(timep, "\n");
+    if (timep != NULL) {
+        fclose(timep);
     }
     fprintf(addrp, "\n");
     if (addrp != NULL) {

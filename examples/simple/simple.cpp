@@ -16,10 +16,6 @@ static void print_usage(int, char ** argv) {
     printf("\n");
 }
 
-void signal_handler(int signum){;}
-long long clearsig_time = 0;
-long long lookup_time = 0;
-long long readsig_time = 0;
 long long inf_time = 0;
 int parent_pid = 0;
 
@@ -183,21 +179,10 @@ int main(int argc, char ** argv) {
 
         for (int n_pos = 0; n_pos + batch.n_tokens < n_prompt + n_predict; ) {
             // evaluate the current batch with the transformer model
-            signal(SIGUSR1, signal_handler);
-            auto t_clearsig_start = std::chrono::high_resolution_clock::now();
-            kill(parent_pid, SIGUSR1);
-            pause();
-            auto t_clearsig_end = std::chrono::high_resolution_clock::now();
             if (llama_decode(ctx, batch)) {
                 fprintf(stderr, "%s : failed to eval, return code %d\n", __func__, 1);
                 return 1;
             }
-            kill(parent_pid, SIGUSR1);
-            pause();
-            auto t_readsig_end = std::chrono::high_resolution_clock::now();
-            clearsig_time = std::chrono::duration_cast<std::chrono::nanoseconds>(t_clearsig_end - t_clearsig_start).count();
-            lookup_time = std::chrono::duration_cast<std::chrono::nanoseconds>(t_readsig_start - t_clearsig_end).count();
-            readsig_time = std::chrono::duration_cast<std::chrono::nanoseconds>(t_readsig_end - t_readsig_start).count();
 
             n_pos += batch.n_tokens;
 
@@ -227,10 +212,10 @@ int main(int argc, char ** argv) {
             }
         }
         auto t_end = std::chrono::high_resolution_clock::now();
-        inf_time = std::chrono::duration_cast<std::chrono::nanoseconds>(t_end - t_start).count();
+        inf_time = std::chrono::duration_cast<std::chrono::microseconds>(t_end - t_start).count();
         std::ofstream file("times.out", std::ios_base::app); // Open file in append mode
         if (file.is_open()) {
-            file << clearsig_time << "," << lookup_time << "," << readsig_time << "," << inf_time << "\n";
+            file << inf_time << "\n";
             file.close();
         } else {
             fprintf(stderr, "Unable to open timing log file");
