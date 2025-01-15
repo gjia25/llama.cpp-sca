@@ -36,6 +36,7 @@ struct result_entry {
 #define PAGEMAP_CHUNK_SIZE	8
 #define CHAR_BIT 8
 #define MAX_REQUESTS 1024
+#define NUM_CORES 16
 
 #define INPUT_ADDRS "/home/grace/llama.cpp-sca/start.out"
 #define NUM_FEATURES 1
@@ -54,7 +55,7 @@ static unsigned long long dur_read;
 int g_got_inputs = 0;
 int g_in_lookup = 0;
 int g_num_lookups = 0;
-pid_t g_pid;
+pid_t child_pids[NUM_CORES-1];
 struct read_request g_requests[MAX_REQUESTS];
 int g_num_requests = 0;
 
@@ -82,11 +83,11 @@ void read_input_addrs(unsigned long *list) {
     }
 }
 
-void clear_accessed_bits(unsigned long start_vaddr, unsigned long end_vaddr) {
+void clear_accessed_bits(unsigned long start_vaddr, unsigned long end_vaddr, pid_t cpid) {
     int fd;
     struct clear_request req;
 
-    req.pid = g_pid;
+    req.pid = cpid;
     req.start_vaddr = start_vaddr;
     req.end_vaddr = end_vaddr;
 
@@ -114,14 +115,14 @@ void clear_accessed_bits(unsigned long start_vaddr, unsigned long end_vaddr) {
     g_num_requests++;
 }
 
-void clear_bits_for_lookups() {
+void clear_bits_for_lookups(pid_t cpid) {
     unsigned long start, end;
     int i;
 
     for (int i = 0; i < NUM_FEATURES; i++) {
         start = g_input_addrs[i] & 0xFFFFFFFFFFFFF000;
         end = (g_input_addrs[i] + EMB_SIZE * NUM_EMBDS) & 0xFFFFFFFFFFFFF000 + 1;
-        clear_accessed_bits(start, end);
+        clear_accessed_bits(start, end, cpid);
     }
 
 }
@@ -177,8 +178,15 @@ void append_accessed_pages(int request_idx) {
 // parent process clears page table entry flags, then sends SIGUSR1 back to child
 // child performs lookup, then sends SIGUSR1 to parent
 // parent reads page table entry flags, then sends SIGUSR1 back to child
-void signal_handler(int signal_num)
+void signal_handler(int signal_num, siginfo_t *info, void *context)
 {
+    pid_t cpid;
+    if (info == NULL) {
+        perror("no siginfo");
+        return;
+    } else {
+        cpid = info->si_pid;
+    }
     FILE *file;
     if (signal_num == SIGUSR1) {
         if (g_got_inputs == 0) {
@@ -189,7 +197,7 @@ void signal_handler(int signal_num)
             gettimeofday(&g_ts_start, NULL);
             g_in_lookup = 1;
             g_num_lookups++;
-            clear_bits_for_lookups();
+            clear_bits_for_lookups(cpid);
             gettimeofday(&g_ts_end, NULL);
             dur_read = 1000000 * (g_ts_end.tv_sec - g_ts_start.tv_sec) + (g_ts_end.tv_usec - g_ts_start.tv_usec);
         } else {
@@ -209,7 +217,7 @@ void signal_handler(int signal_num)
             fprintf(file, "%llu,%llu\n", dur_clear, dur_read);
             fclose(file);
         }
-        kill(g_pid, SIGUSR1);
+        kill(cpid, SIGUSR1);
     }
 }
 
@@ -217,68 +225,85 @@ int main(int argc, char *argv[])
 {
 	int status, err = 0;
 	double mbytes;
-	pid_t ppid;
+	pid_t ppid, pid, cpid;
 	
 	// options
 	if (argc < 7) {
-		printf("USAGE: walk <bin> -m <model_path> -n <n_predict> prompt_file\n");
+		printf("USAGE: walk <bin> -m <model_path> -n <n_predict> prompt_dir\n");
 		exit(0);
 	}
     printf("RUNNING: %s %s %s %s %s %s\n", argv[1], argv[2], argv[3], argv[4], argv[5], argv[6]);
 	ppid = getpid(); // parent PID
 
 	gettimeofday(&g_ts0, NULL);
-	g_pid = fork(); // child PID
 
-	if (g_pid == -1) {
-		// Fork failed
-		perror("fork");
-		exit(EXIT_FAILURE);
-	} else if (g_pid == 0) {
-		printf("In child process\n");
-		
-		// Set child process to run on core 1
-		cpu_set_t cpuset;
-		CPU_ZERO(&cpuset);
-		CPU_SET(1, &cpuset); 
+    for (int i = 0; i < NUM_CORES-1; i++) {
+        pid = fork(); // child PID
 
-		if (sched_setaffinity(0, sizeof(cpuset), &cpuset) == -1) {
-			perror("sched_setaffinity");
-			exit(EXIT_FAILURE);
-		}
-		
-		// Pass parent PID to child
-		char pid_arg[20];
-		sprintf(pid_arg, "%d", ppid);
-        printf("RUNNING IN CHILD: %s %s %s %s %s %s %s %s\n", argv[1], argv[2], argv[3], argv[4], argv[5], "-p", pid_arg, argv[6]);
-		execlp(argv[1], argv[1], argv[2], argv[3], argv[4], argv[5], "-p", pid_arg, argv[6], NULL);
-		
-		// If execlp returns, it means it failed
-		perror("execlp");
-		exit(EXIT_FAILURE);
-	} else {
-		printf("In parent process\n");
-		
-		// Set parent process to run on core 0
-		cpu_set_t cpuset;
-		CPU_ZERO(&cpuset);
-		CPU_SET(0, &cpuset);
+        if (pid == -1) {
+            // Fork failed
+            perror("fork");
+            exit(EXIT_FAILURE);
+        } else if (pid == 0) {
+            child_pids[i] = getpid();
+            printf("In child process %d with PID %d\n", i, child_pids[i]);
+            
+            // Set child process to run on core i
+            cpu_set_t cpuset;
+            CPU_ZERO(&cpuset);
+            CPU_SET(i, &cpuset); 
 
-		if (sched_setaffinity(0, sizeof(cpuset), &cpuset) == -1) {
-			perror("sched_setaffinity");
-			exit(EXIT_FAILURE);
-		}
+            if (sched_setaffinity(0, sizeof(cpuset), &cpuset) == -1) {
+                perror("sched_setaffinity");
+                exit(EXIT_FAILURE);
+            }
+            
+            // Pass parent PID to child
+            char pid_arg[20];
+            sprintf(pid_arg, "%d", ppid);
+            char filepath[20];
+            sprintf(filepath, "%s/med%d.txt", argv[6], i);
+            printf("RUNNING IN CHILD %d: %s %s %s %s %s %s %s %s\n", i, argv[1], argv[2], argv[3], argv[4], argv[5], "-p", pid_arg, filepath);
+            execlp(argv[1], argv[1], argv[2], argv[3], argv[4], argv[5], "-p", pid_arg, filepath, NULL);
+            
+            // If execlp returns, it means it failed
+            perror("execlp");
+            exit(EXIT_FAILURE);
+        }
+    }
 
-		printf("Parent: Watching page references of PID %d ...\n", g_pid);
+    printf("In parent process\n");
+    
+    // Set parent process to run on core 0
+    cpu_set_t cpuset;
+    CPU_ZERO(&cpuset);
+    CPU_SET(NUM_CORES-1, &cpuset);
 
-		signal(SIGUSR1, signal_handler); // Set signal handler for SIGUSR1
-        printf("Parent: Set up signal handler for %d\n", SIGUSR1);
-		while (waitpid(g_pid, NULL, WNOHANG) >= 0) { // Loop until child process exits
-			;
-		}
+    if (sched_setaffinity(0, sizeof(cpuset), &cpuset) == -1) {
+        perror("sched_setaffinity");
+        exit(EXIT_FAILURE);
+    }
 
-		printf("Parent: Child process exited with status %d\n", status);
-		printf("Parent: g_num_lookups = %d\n", g_num_lookups);
-	}	
+    struct sigaction sa;
+    sa.sa_sigaction = signal_handler;
+    sa.sa_flags = SA_SIGINFO;
+    sigemptyset(&sa.sa_mask);
+    if (sigaction(SIGUSR1, &sa, NULL) == -1) {
+        perror("sigaction");
+        exit(EXIT_FAILURE);
+    }
+    
+    printf("Parent: Watching page references of children ...\n");
+
+    int status;
+    printf("Parent: Set up signal handler for %d\n", SIGUSR1);
+    while (cpid = waitpid(-1, &status, WNOHANG) > 0) { // Loop until all child processes exit
+        if (cpid > 0) {
+            printf("Parent: Child process %d exited\n", cpid);
+        }
+    }
+
+    printf("Parent: All child processes exited\n");
+    printf("Parent: g_num_lookups = %d\n", g_num_lookups);
 	return 1;
 }
