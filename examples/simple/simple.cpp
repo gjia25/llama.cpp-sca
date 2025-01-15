@@ -228,12 +228,12 @@ int main(int argc, char ** argv) {
         } else {
             fprintf(stderr, "Unable to open timing log file");
         }
-        printf("\n");
+        // printf("\n");
 
         const auto t_main_end = ggml_time_us();
 
-        fprintf(stderr, "%s: decoded %d tokens in %.2f s, speed: %.2f t/s\n",
-                __func__, n_decode, (t_main_end - t_main_start) / 1000000.0f, n_decode / ((t_main_end - t_main_start) / 1000000.0f));
+        // fprintf(stderr, "%s: decoded %d tokens in %.2f s, speed: %.2f t/s\n",
+        //         __func__, n_decode, (t_main_end - t_main_start) / 1000000.0f, n_decode / ((t_main_end - t_main_start) / 1000000.0f));
 
         // fprintf(stderr, "\n");
         // llama_perf_sampler_print(smpl);
