@@ -1,4 +1,5 @@
 #include "llama.h"
+#include "ggml.h" 
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -90,6 +91,13 @@ int main(int argc, char ** argv) {
         }
     }
 
+    // only print errors
+    llama_log_set([](enum ggml_log_level level, const char * text, void * /* user_data */) {
+        if (level >= GGML_LOG_LEVEL_ERROR) {
+            fprintf(stderr, "%s", text);
+        }
+    }, nullptr);
+    
     // open the text file
     std::ifstream infile(file_path);
     if (!infile.is_open()) {
@@ -227,10 +235,10 @@ int main(int argc, char ** argv) {
         fprintf(stderr, "%s: decoded %d tokens in %.2f s, speed: %.2f t/s\n",
                 __func__, n_decode, (t_main_end - t_main_start) / 1000000.0f, n_decode / ((t_main_end - t_main_start) / 1000000.0f));
 
-        fprintf(stderr, "\n");
-        llama_perf_sampler_print(smpl);
-        llama_perf_context_print(ctx);
-        fprintf(stderr, "\n");
+        // fprintf(stderr, "\n");
+        // llama_perf_sampler_print(smpl);
+        // llama_perf_context_print(ctx);
+        // fprintf(stderr, "\n");
 
         llama_sampler_free(smpl);
         llama_free(ctx);
