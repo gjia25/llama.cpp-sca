@@ -154,36 +154,16 @@ int main(int argc, char ** argv) {
             return 1;
         }
 
-        // initialize the sampler
-
-        auto sparams = llama_sampler_chain_default_params();
-        sparams.no_perf = false;
-        llama_sampler * smpl = llama_sampler_chain_init(sparams);
-
-        llama_sampler_chain_add(smpl, llama_sampler_init_greedy());
-
-        // print the prompt token-by-token
-
-        for (auto id : prompt_tokens) {
-            char buf[128];
-            int n = llama_token_to_piece(model, id, buf, sizeof(buf), 0, true);
-            if (n < 0) {
-                fprintf(stderr, "%s: error: failed to convert token to piece\n", __func__);
-                return 1;
-            }
-            std::string s(buf, n);
-            printf("%s", s.c_str());
-        }
-
         // prepare a batch for the prompt
-
         llama_batch batch = llama_batch_get_one(prompt_tokens.data(), prompt_tokens.size());
 
         // main loop
-
         const auto t_main_start = ggml_time_us();
         int n_decode = 0;
         llama_token new_token_id;
+        
+        char filename[50];
+        sprintf(filename, "times-%d.out", getpid());    
 
         for (int n_pos = 0; n_pos + batch.n_tokens < n_prompt + n_predict; ) {
             // evaluate the current batch with the transformer model
@@ -193,35 +173,11 @@ int main(int argc, char ** argv) {
             }
 
             n_pos += batch.n_tokens;
-
-            // sample the next token
-            {
-                new_token_id = llama_sampler_sample(smpl, ctx, -1);
-
-                // is it an end of generation?
-                if (llama_token_is_eog(model, new_token_id)) {
-                    break;
-                }
-
-                char buf[128];
-                int n = llama_token_to_piece(model, new_token_id, buf, sizeof(buf), 0, true);
-                if (n < 0) {
-                    fprintf(stderr, "%s: error: failed to convert token to piece\n", __func__);
-                    return 1;
-                }
-                std::string s(buf, n);
-                printf("%s", s.c_str());
-                fflush(stdout);
-
-                // prepare the next batch with the sampled token
-                batch = llama_batch_get_one(&new_token_id, 1);
-
-                n_decode += 1;
-            }
+            n_decode += 1;
         }
         auto t_end = std::chrono::high_resolution_clock::now();
         inf_time = std::chrono::duration_cast<std::chrono::microseconds>(t_end - t_start).count();
-        std::ofstream file("times.out", std::ios_base::app); // Open file in append mode
+        std::ofstream file(filename, std::ios_base::app); // Open file in append mode
         if (file.is_open()) {
             file << inf_time << "\n";
             file.close();
@@ -232,15 +188,14 @@ int main(int argc, char ** argv) {
 
         const auto t_main_end = ggml_time_us();
 
-        // fprintf(stderr, "%s: decoded %d tokens in %.2f s, speed: %.2f t/s\n",
-        //         __func__, n_decode, (t_main_end - t_main_start) / 1000000.0f, n_decode / ((t_main_end - t_main_start) / 1000000.0f));
+        fprintf(stderr, "%s: decoded %d tokens in %.2f s, speed: %.2f t/s\n",
+                __func__, n_decode, (t_main_end - t_main_start) / 1000000.0f, n_decode / ((t_main_end - t_main_start) / 1000000.0f));
 
         // fprintf(stderr, "\n");
         // llama_perf_sampler_print(smpl);
         // llama_perf_context_print(ctx);
         // fprintf(stderr, "\n");
 
-        llama_sampler_free(smpl);
         llama_free(ctx);
     }
 
