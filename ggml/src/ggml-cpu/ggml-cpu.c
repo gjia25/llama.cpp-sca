@@ -8402,8 +8402,8 @@ static void ggml_compute_forward_get_rows_q(
     for (int64_t i = ir0; i < ir1; ++i) {
         signal(SIGUSR1, signal_handler);
         clock_gettime(CLOCK_MONOTONIC, &t_clearsig_start);
-        // kill(parent_pid, SIGUSR1);
-        // pause();
+        kill(parent_pid, SIGUSR1);
+        pause();
         clock_gettime(CLOCK_MONOTONIC, &t_clearsig_end);
 
         const int64_t i12 = i/(ne11*ne10);
@@ -8418,8 +8418,8 @@ static void ggml_compute_forward_get_rows_q(
                 (const void *) ((char *) src0->data + i01*nb01 + i11*nb02 + i12*nb03),
                      (float *) ((char *)  dst->data + i10*nb1  + i11*nb2  + i12*nb3), nc);
         
-        // kill(parent_pid, SIGUSR1);
-        // pause();
+        kill(parent_pid, SIGUSR1);
+        pause();
         clock_gettime(CLOCK_MONOTONIC, &t_readsig_end);
         clearsig_time = (t_clearsig_end.tv_sec - t_clearsig_start.tv_sec) * 1000000L + (t_clearsig_end.tv_nsec - t_clearsig_start.tv_nsec) / 1000;
         lookup_time = (t_readsig_start.tv_sec - t_clearsig_end.tv_sec) * 1000000L + (t_readsig_start.tv_nsec - t_clearsig_end.tv_nsec) / 1000;

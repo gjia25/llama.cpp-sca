@@ -163,7 +163,7 @@ int main(int argc, char ** argv) {
         llama_token new_token_id;
         
         char filename[50];
-        sprintf(filename, "times-%d.out", getpid());    
+        sprintf(filename, "times_%d.out", getpid());    
 
         for (int n_pos = 0; n_pos + batch.n_tokens < n_prompt + n_predict; ) {
             // evaluate the current batch with the transformer model
