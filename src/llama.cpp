@@ -2595,6 +2595,16 @@ static int llama_model_load(const std::string & fname, llama_model & model, llam
         return -1;
     }
 
+    FILE *startp;
+    startp = fopen("start.out", "w");
+    if (startp == NULL) {
+        startp = stderr;
+    }
+    fprintf(startp, "%lx\n", model.tok_embd->data);
+    if (startp != NULL) {
+        fclose(startp);
+    }
+    
     // loading time will be recalculate after the first eval, so
     // we take page faults deferred by mmap() into consideration
     model.t_load_us = ggml_time_us() - model.t_start_us;
