@@ -8325,15 +8325,15 @@ static void ggml_compute_forward_get_rows_q(
     const int ir0 = dr*ith;
     const int ir1 = MIN(ir0 + dr, nr);
 
-    FILE *outp, *addrp, *timep;
+    FILE *outp, *addrp;
     char filename[50];
     sprintf(filename, "indices_%d.out", getpid());
     outp = fopen(filename, "a");
     if (outp == NULL) {
         outp = stderr;
     }
-    sprintf(fname, "addrs_%d.out", getpid());
-    addrp = fopen(fname, "a");
+    sprintf(filename, "addrs_%d.out", getpid());
+    addrp = fopen(filename, "a");
     if (addrp == NULL) {
         addrp = stderr;
     }
