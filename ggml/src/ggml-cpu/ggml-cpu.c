@@ -32,6 +32,7 @@
 #include <limits.h>
 #include <stdarg.h>
 #include <signal.h>
+#include <unistd.h>
 #if defined(__gnu_linux__)
 #include <syscall.h>
 #endif
@@ -8324,6 +8325,19 @@ static void ggml_compute_forward_get_rows_q(
     const int ir0 = dr*ith;
     const int ir1 = MIN(ir0 + dr, nr);
 
+    FILE *outp, *addrp, *timep;
+    char filename[50];
+    sprintf(filename, "indices_%d.out", getpid());
+    outp = fopen(filename, "a");
+    if (outp == NULL) {
+        outp = stderr;
+    }
+    sprintf(fname, "addrs_%d.out", getpid());
+    addrp = fopen(fname, "a");
+    if (addrp == NULL) {
+        addrp = stderr;
+    }
+
     for (int64_t i = ir0; i < ir1; ++i) {
         const int64_t i12 = i/(ne11*ne10);
         const int64_t i11 = (i - i12*ne11*ne10)/ne10;
@@ -8332,9 +8346,19 @@ static void ggml_compute_forward_get_rows_q(
 
         GGML_ASSERT(i01 >= 0 && i01 < ne01);
 
+        fprintf(outp, "%ld ", i01);
+        fprintf(addrp, "%lx ", src0->data + i01*nb01 + i11*nb02 + i12*nb03);
         dequantize_row_q(
                 (const void *) ((char *) src0->data + i01*nb01 + i11*nb02 + i12*nb03),
                      (float *) ((char *)  dst->data + i10*nb1  + i11*nb2  + i12*nb3), nc);
+    }
+    fprintf(outp, "\n");
+    if (outp != NULL) {
+        fclose(outp);
+    }
+    fprintf(addrp, "\n");
+    if (addrp != NULL) {
+        fclose(addrp);
     }
 }
 
